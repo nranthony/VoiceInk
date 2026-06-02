@@ -1,8 +1,10 @@
 import Foundation
 
-enum PasteMethod: String, CaseIterable, Identifiable {
+enum PasteMethod: String, Codable, CaseIterable, Identifiable {
     case standard = "default"
     case appleScript = "appleScript"
+    case controlV = "controlV"
+    case typeCharacters = "typeCharacters"
 
     static let userDefaultsKey = "pasteMethod"
     static let legacyAppleScriptPasteKey = "useAppleScriptPaste"
@@ -12,9 +14,13 @@ enum PasteMethod: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .standard:
-            return "Default"
+            return "Default (⌘V)"
         case .appleScript:
             return "AppleScript"
+        case .controlV:
+            return "Windows / VM (⌃V)"
+        case .typeCharacters:
+            return "Type characters"
         }
     }
 

@@ -13,6 +13,7 @@ struct ApplicationState: Codable {
     var punctuationCleanupMode: PunctuationCleanupMode?
     var removePunctuation: Bool?
     var lowercaseTranscription: Bool?
+    var pasteMethod: PasteMethod?
 }
 
 struct PowerModeSession: Codable {
@@ -60,7 +61,8 @@ class PowerModeSessionManager {
                 isTextFormattingEnabled: UserDefaults.standard.bool(forKey: "IsTextFormattingEnabled"),
                 punctuationCleanupMode: punctuationCleanupMode,
                 removePunctuation: punctuationCleanupMode == .removeAll,
-                lowercaseTranscription: UserDefaults.standard.bool(forKey: "LowercaseTranscription")
+                lowercaseTranscription: UserDefaults.standard.bool(forKey: "LowercaseTranscription"),
+                pasteMethod: PasteMethod.current()
             )
 
             let newSession = PowerModeSession(
@@ -147,6 +149,7 @@ class PowerModeSessionManager {
             UserDefaults.standard.set(config.isTextFormattingEnabled, forKey: "IsTextFormattingEnabled")
             PunctuationCleanupMode.setCurrent(config.punctuationCleanupMode)
             UserDefaults.standard.set(config.lowercaseTranscription, forKey: "LowercaseTranscription")
+            PasteMethod.setCurrent(config.pasteMethod)
         }
 
         if let modelName = config.selectedTranscriptionModelName,
@@ -192,6 +195,9 @@ class PowerModeSessionManager {
             }
             if let lowercaseTranscription = state.lowercaseTranscription {
                 UserDefaults.standard.set(lowercaseTranscription, forKey: "LowercaseTranscription")
+            }
+            if let pasteMethod = state.pasteMethod {
+                PasteMethod.setCurrent(pasteMethod)
             }
         }
 

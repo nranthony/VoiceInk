@@ -31,6 +31,7 @@ struct ConfigurationView: View {
     @State private var newWebsiteURL: String = ""
     @State private var useScreenCapture = false
     @State private var autoSendKey: AutoSendKey = .none
+    @State private var pasteMethod: PasteMethod = .standard
     @State private var isDefault = false
     @State private var isShowingDeleteConfirmation = false
     @State private var powerModeConfigId: UUID = UUID()
@@ -89,6 +90,7 @@ struct ConfigurationView: View {
             _selectedEmoji = State(initialValue: "✏️")
             _useScreenCapture = State(initialValue: false)
             _autoSendKey = State(initialValue: .none)
+            _pasteMethod = State(initialValue: .standard)
             _isDefault = State(initialValue: false)
             // Use UserDefaults directly since EnvironmentObjects aren't available in init
             _selectedAIProvider = State(initialValue: UserDefaults.standard.string(forKey: "selectedAIProvider"))
@@ -111,6 +113,7 @@ struct ConfigurationView: View {
             _websiteConfigs = State(initialValue: latestConfig.urlConfigs ?? [])
             _useScreenCapture = State(initialValue: latestConfig.useScreenCapture)
             _autoSendKey = State(initialValue: latestConfig.autoSendKey)
+            _pasteMethod = State(initialValue: latestConfig.pasteMethod)
             _isDefault = State(initialValue: latestConfig.isDefault)
             _selectedAIProvider = State(initialValue: latestConfig.selectedAIProvider)
             _selectedAIModel = State(initialValue: latestConfig.selectedAIModel)
@@ -515,6 +518,17 @@ struct ConfigurationView: View {
                         }
                     }
 
+                    Picker(selection: $pasteMethod) {
+                        ForEach(PasteMethod.allCases) { method in
+                            Text(method.displayName).tag(method)
+                        }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Text("Paste Method")
+                            InfoTip("How text is inserted at the cursor. Use \"Windows / VM (⌃V)\" or \"Type characters\" when pasting into a Windows app running in a VM or over RDP, where the default ⌘V only inserts a stray \"V\". \"Type characters\" requires the RDP/VM client's keyboard set to Unicode mode (e.g. Windows App → Keyboard → Unicode); in Scan code mode it types \"A\" repeatedly. \"Windows / VM (⌃V)\" needs the opposite — Scan code mode — plus host-to-guest clipboard sharing enabled and synced.")
+                        }
+                    }
+
                     HStack {
                         Text("Keyboard Shortcut")
                         InfoTip("Assign a unique keyboard shortcut to instantly activate this Power Mode and start recording.")
@@ -639,6 +653,7 @@ struct ConfigurationView: View {
                 selectedAIProvider: selectedAIProvider,
                 selectedAIModel: selectedAIModel,
                 autoSendKey: autoSendKey,
+                pasteMethod: pasteMethod,
                 isDefault: isDefault
             )
         case .edit(let config):
@@ -656,6 +671,7 @@ struct ConfigurationView: View {
             updatedConfig.urlConfigs = websiteConfigs.isEmpty ? nil : websiteConfigs
             updatedConfig.useScreenCapture = useScreenCapture
             updatedConfig.autoSendKey = autoSendKey
+            updatedConfig.pasteMethod = pasteMethod
             updatedConfig.selectedAIProvider = selectedAIProvider
             updatedConfig.selectedAIModel = selectedAIModel
             updatedConfig.isDefault = isDefault

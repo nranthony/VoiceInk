@@ -20,6 +20,7 @@ class CursorPaster {
     private static let prePasteDelay: TimeInterval = 0.10
     private static let pasteShortcutEventDelay: TimeInterval = 0.01
     private static let minimumClipboardRestoreDelay: TimeInterval = 0.25
+    private static let typeCharacterDelay: TimeInterval = 0.004
 
     static func pasteAtCursor(_ text: String) {
         Task {
@@ -61,7 +62,7 @@ class CursorPaster {
 
         await wait(prePasteDelay)
 
-        let pasteResult = await postPasteCommand()
+        let pasteResult = await postPasteCommand(text)
         if shouldRestoreClipboard {
             scheduleClipboardRestore(
                 savedContents,
@@ -86,10 +87,15 @@ class CursorPaster {
     }
 
     @MainActor
-    private static func postPasteCommand() async -> PasteResult {
-        if PasteMethod.current() == .appleScript {
+    private static func postPasteCommand(_ text: String) async -> PasteResult {
+        switch PasteMethod.current() {
+        case .appleScript:
             return pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
-        } else {
+        case .controlV:
+            return await pasteUsingControlV()
+        case .typeCharacters:
+            return await typeText(text)
+        case .standard:
             return await pasteFromClipboard()
         }
     }
@@ -203,6 +209,80 @@ class CursorPaster {
         vUp.post(tap: .cghidEventTap)
         await wait(pasteShortcutEventDelay)
         cmdUp.post(tap: .cghidEventTap)
+
+        return .commandPosted
+    }
+
+    // MARK: - Windows / VM paste (Ctrl+V)
+
+    // Posts Ctrl+V instead of Cmd+V. Windows apps running in a VM / over RDP use Ctrl+V to
+    // paste, and the guest typically receives the Mac's Control modifier intact (whereas Command
+    // does not map and the focused window only sees the bare "V" character).
+    @MainActor
+    private static func pasteUsingControlV() async -> PasteResult {
+        guard AXIsProcessTrusted() else {
+            logger.error("Accessibility permission is required to paste with simulated key events")
+            return .commandNotPosted
+        }
+
+        let source = CGEventSource(stateID: .privateState)
+
+        guard let ctrlDown = CGEvent(keyboardEventSource: source, virtualKey: 0x3B, keyDown: true),
+              let vDown = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: true),
+              let vUp = CGEvent(keyboardEventSource: source, virtualKey: 0x09, keyDown: false),
+              let ctrlUp = CGEvent(keyboardEventSource: source, virtualKey: 0x3B, keyDown: false) else {
+            logger.error("Failed to create Ctrl+V keyboard events")
+            return .commandNotPosted
+        }
+
+        ctrlDown.flags = .maskControl
+        vDown.flags    = .maskControl
+        vUp.flags      = .maskControl
+
+        ctrlDown.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        vDown.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        vUp.post(tap: .cghidEventTap)
+        await wait(pasteShortcutEventDelay)
+        ctrlUp.post(tap: .cghidEventTap)
+
+        return .commandPosted
+    }
+
+    // MARK: - Direct typing
+
+    // Types the text character-by-character as Unicode key events, bypassing the clipboard and
+    // any paste shortcut entirely. Works even when clipboard sharing between the Mac and a VM/RDP
+    // session is disabled, at the cost of being slower for long text.
+    //
+    // The events carry the character via keyboardSetUnicodeString with virtualKey 0, so the RDP/VM
+    // client must be in Unicode keyboard mode (e.g. Windows App → Keyboard → Unicode). In Scan code
+    // mode the client reads the virtual key instead of the Unicode payload — virtualKey 0 is the
+    // physical "A" key, so every character arrives as "A".
+    @MainActor
+    private static func typeText(_ text: String) async -> PasteResult {
+        guard AXIsProcessTrusted() else {
+            logger.error("Accessibility permission is required to type text with simulated key events")
+            return .commandNotPosted
+        }
+
+        let source = CGEventSource(stateID: .privateState)
+
+        for character in text {
+            let utf16 = Array(String(character).utf16)
+            guard let keyDown = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: true),
+                  let keyUp = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: false) else {
+                continue
+            }
+
+            keyDown.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+            keyUp.keyboardSetUnicodeString(stringLength: utf16.count, unicodeString: utf16)
+
+            keyDown.post(tap: .cghidEventTap)
+            keyUp.post(tap: .cghidEventTap)
+            await wait(typeCharacterDelay)
+        }
 
         return .commandPosted
     }
