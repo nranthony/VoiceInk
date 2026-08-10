@@ -9,6 +9,20 @@ enum EnhancementPrompt {
     case aiAssistant
 }
 
+/// Lets two racing callbacks share one continuation: the first to claim wins, the loser is a no-op.
+private final class OneShotResolver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isResolved = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isResolved else { return false }
+        isResolved = true
+        return true
+    }
+}
+
 @MainActor
 class AIEnhancementService: ObservableObject {
     private let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "AIEnhancementService")
@@ -74,7 +88,20 @@ class AIEnhancementService: ObservableObject {
     private let rateLimitInterval: TimeInterval = 1.0
     private var lastRequestTime: Date?
     private let modelContext: ModelContext
-    
+
+    // Serial so a wedged read cannot pile up threads across recordings; a later read simply
+    // queues behind it and gives up on its own timeout.
+    private static let clipboardReadQueue = DispatchQueue(
+        label: "com.prakashjoshipax.voiceink.clipboardRead",
+        qos: .userInitiated
+    )
+    private static let clipboardReadTimeout: TimeInterval = 2.0
+    private static let clipboardLogger = Logger(
+        subsystem: "com.prakashjoshipax.voiceink",
+        category: "AIEnhancementService"
+    )
+    private var clipboardCaptureTask: Task<Void, Never>?
+
     @Published var lastCapturedClipboard: String?
 
     init(aiService: AIService = AIService(), modelContext: ModelContext) {
@@ -396,6 +423,13 @@ class AIEnhancementService: ObservableObject {
     }
 
     func captureScreenContext() async {
+        // Capturing and OCR-ing the screen on every recording is wasted work when no enhancement
+        // request will read it back — see the ordering note on captureClipboardContext.
+        guard isEnhancementEnabled, useScreenCaptureContext else {
+            screenCaptureService.lastCapturedText = nil
+            return
+        }
+
         guard CGPreflightScreenCaptureAccess() else {
             return
         }
@@ -407,11 +441,49 @@ class AIEnhancementService: ObservableObject {
         }
     }
 
+    // Reading NSPasteboard is a synchronous IPC to the pasteboard server. When the clipboard is
+    // owned by a remote/VM client — Windows App over RDP advertises its types lazily and only
+    // fetches the payload from the guest on demand — that IPC blocks until the server's ~60s
+    // timeout. On the main actor that freezes the whole app mid-recording: audio keeps buffering,
+    // the streaming session cannot flip to .streaming, and the transcript lands in whatever window
+    // has focus a minute later. So: skip the read when nothing will consume it, and when we do
+    // read, do it off the main thread and give up early.
     func captureClipboardContext() {
-        lastCapturedClipboard = NSPasteboard.general.string(forType: .string)
+        clipboardCaptureTask?.cancel()
+        lastCapturedClipboard = nil
+
+        guard isEnhancementEnabled, useClipboardContext else { return }
+
+        clipboardCaptureTask = Task { [weak self] in
+            let clipboard = await Self.readClipboardString(timeout: Self.clipboardReadTimeout)
+            guard !Task.isCancelled else { return }
+            self?.lastCapturedClipboard = clipboard
+        }
     }
-    
+
+    /// Returns the clipboard's plain text, or nil if the pasteboard did not answer in time.
+    private static func readClipboardString(timeout: TimeInterval) async -> String? {
+        let resolver = OneShotResolver()
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
+            clipboardReadQueue.async {
+                let clipboard = NSPasteboard.general.string(forType: .string)
+                if resolver.claim() {
+                    continuation.resume(returning: clipboard)
+                }
+            }
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                if resolver.claim() {
+                    clipboardLogger.notice("Clipboard read timed out after \(timeout, format: .fixed(precision: 1), privacy: .public)s – continuing without clipboard context")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
     func clearCapturedContexts() {
+        clipboardCaptureTask?.cancel()
         lastCapturedClipboard = nil
         screenCaptureService.lastCapturedText = nil
     }
