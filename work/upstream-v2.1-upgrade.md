@@ -155,6 +155,53 @@ It is arguably worse there: the same fan-out also runs `SelectedTextService.fetc
 This is a good candidate to offer upstream as a PR — it is a real bug affecting anyone dictating
 into a VM, RDP session, or Remote Desktop client, and the fix is small.
 
+### ⚠ `useSelectedTextContext` defaults to ON after the merge
+
+`ModeConfig`'s decoder falls back to the **legacy global UserDefaults keys** when a saved mode
+lacks the field — which ours all do, since v1.79's `PowerModeConfig` never had them:
+
+```swift
+useClipboardContext = try container.decodeIfPresent(...)
+    ?? UserDefaults.standard.bool(forKey: "useClipboardContext")
+
+if let decoded = try container.decodeIfPresent(Bool.self, forKey: .useSelectedTextContext) {
+    useSelectedTextContext = decoded
+} else if UserDefaults.standard.object(forKey: "useSelectedTextContext") == nil {
+    useSelectedTextContext = true          // ← ON when the key is absent
+} else {
+    useSelectedTextContext = UserDefaults.standard.bool(forKey: "useSelectedTextContext")
+}
+```
+
+- `useClipboardContext` — unset globally → decodes to `false`. Safe.
+- `useSelectedTextContext` — unset globally → decodes to **`true`**. Every mode comes up with
+  selected-text capture enabled, including the synthetic ⌘C (`.menuAction` strategy) fired into
+  whatever window has focus. In a VM/RDP target that is both a privacy and a correctness problem.
+
+**Mitigation, cheapest first:** set the global key explicitly before merging —
+
+```bash
+defaults write com.prakashjoshipax.VoiceInk useSelectedTextContext -bool false
+```
+
+— or better, add a fork-local global flag using exactly that key name so the value is set through
+the app. Upstream's migration then carries `false` into every `ModeConfig` for free.
+
+**What mirroring upstream does and does not buy us:**
+
+| Piece | Mirrors upstream | Survives merge |
+|---|---|---|
+| Key name `useSelectedTextContext` / `useClipboardContext` | yes | yes — upstream decodes from it |
+| The value we set | — | yes — migrated into every mode |
+| Per-mode plumbing (`ModeConfig`/`Draft`/`FormView`/`ModeRuntimeConfiguration`) | upstream has it, we don't | theirs wins, and theirs is richer |
+| **Gating the capture, not just its use** | **no upstream equivalent** | **no — re-apply by hand** |
+
+The last row is the one that matters: upstream's flags are read at prompt-assembly time
+(`AIEnhancementService.swift:116-117`), never at capture time. Matching the names is worth doing,
+but it does **not** carry the protection across — the capture-side gating, the off-main pasteboard
+read, and the timeout are all fork-local and must be re-applied to
+`RecordingContextCaptureService.startCapture`.
+
 ## 5. Suggested sequence
 
 1. `git switch main && git merge upstream/main && git push` — clean, no conflicts.
