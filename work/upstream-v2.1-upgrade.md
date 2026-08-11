@@ -9,6 +9,10 @@ This document is the running plan for moving the fork onto upstream v2.1. It is 
 revisited and appended to when later upstream versions land — see [Appending for future
 versions](#appending-for-future-versions) at the end.
 
+> **Also blocked on this upgrade:** [agentic-actions-research.md](agentic-actions-research.md) —
+> the per-Mode `outputMode: .customCommand` and trigger-word routing that arrive with v2.x are the
+> foundation for voice-triggered agent actions.
+
 ---
 
 ## 1. Why this is not a plain rebase
