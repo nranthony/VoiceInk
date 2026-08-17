@@ -24,6 +24,8 @@ problem was understood is usually the useful part.
 |---|---|---|
 | [upstream-v2.1-upgrade](upstream-v2.1-upgrade.md) | open | Rebasing the fork onto upstream v2.1: PowerMode→Modes rename, conflict map, migration traps, and which fork patches must be carried forward |
 | [shortcut-permission-diagnostics](shortcut-permission-diagnostics.md) | open | Missing Input Monitoring kills the global hotkey with no log output; add diagnostics and retry-on-activate |
+| [agentic-actions-research](agentic-actions-research.md) | research complete | Voice → Claude Code → ClickUp: routing surface, upstream `customCommand` seam, constraints, implementation ladder |
+| [paste-shortcuts-branch-review](paste-shortcuts-branch-review.md) | open | Security + validity review of the branch (clean / 3 minor fixes) and of the v2.1 plan (claims verified; conflict map + step 6 stale) |
 
 ## Fork patch categories
 
