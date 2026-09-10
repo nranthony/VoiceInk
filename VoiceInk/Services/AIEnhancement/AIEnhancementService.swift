@@ -464,6 +464,10 @@ class AIEnhancementService: ObservableObject {
     /// Returns the clipboard's plain text, or nil if the pasteboard did not answer in time.
     private static func readClipboardString(timeout: TimeInterval) async -> String? {
         let resolver = OneShotResolver()
+        // Read on the main actor and capture the value: Logger is Sendable, but the static itself
+        // is main-actor isolated by the enclosing class and cannot be touched from the timeout's
+        // background closure.
+        let logger = clipboardLogger
 
         return await withCheckedContinuation { (continuation: CheckedContinuation<String?, Never>) in
             clipboardReadQueue.async {
@@ -475,7 +479,7 @@ class AIEnhancementService: ObservableObject {
 
             DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
                 if resolver.claim() {
-                    clipboardLogger.notice("Clipboard read timed out after \(timeout, format: .fixed(precision: 1), privacy: .public)s – continuing without clipboard context")
+                    logger.notice("Clipboard read timed out after \(timeout, format: .fixed(precision: 1), privacy: .public)s – continuing without clipboard context")
                     continuation.resume(returning: nil)
                 }
             }
