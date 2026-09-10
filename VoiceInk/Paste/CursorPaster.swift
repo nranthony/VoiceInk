@@ -3,10 +3,32 @@ import AppKit
 import Carbon
 import os
 
+/// Lets two racing callbacks share one continuation: the first to claim wins, the loser is a no-op.
+private final class OneShotResolver: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isResolved = false
+
+    func claim() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !isResolved else { return false }
+        isResolved = true
+        return true
+    }
+}
+
 class CursorPaster {
     private typealias ClipboardItemSnapshot = [(NSPasteboard.PasteboardType, Data)]
     private typealias ClipboardSnapshot = [ClipboardItemSnapshot]
     private static let logger = Logger(subsystem: "com.prakashjoshipax.voiceink", category: "CursorPaster")
+
+    // Serial so a wedged snapshot cannot pile up threads across pastes; a later snapshot simply
+    // queues behind it and gives up on its own timeout.
+    private static let clipboardSnapshotQueue = DispatchQueue(
+        label: "com.prakashjoshipax.voiceink.clipboardSnapshot",
+        qos: .userInitiated
+    )
+    private static let clipboardSnapshotTimeout: TimeInterval = 2.0
 
     enum PasteResult: Equatable {
         case commandPosted
@@ -47,14 +69,31 @@ class CursorPaster {
     @MainActor
     private static func performPasteSession(_ text: String) async -> PasteResult {
         let pasteboard = NSPasteboard.general
+        let method = PasteMethod.current()
         let shouldRestoreClipboard = UserDefaults.standard.bool(forKey: "restoreClipboardAfterPaste")
-        let savedContents = shouldRestoreClipboard ? snapshotClipboard(from: pasteboard) : []
+
+        // `typeCharacters` posts the text as Unicode key events, so the clipboard is not the
+        // transport for it. With restore enabled the snapshot/set/restore round trip ends exactly
+        // where it started — pure work, plus a window where the user's clipboard is clobbered.
+        if method == .typeCharacters, shouldRestoreClipboard {
+            return await postPasteCommand(text, using: method)
+        }
+
+        // nil means "no usable snapshot": either restore is off, or the pasteboard did not answer
+        // in time. Restoring from a snapshot we failed to take would wipe the clipboard, so both
+        // cases skip the restore.
+        var savedContents: ClipboardSnapshot?
+        if shouldRestoreClipboard {
+            savedContents = await snapshotClipboard(timeout: clipboardSnapshotTimeout)
+        }
+
+        let willRestoreClipboard = savedContents != nil
         let sessionID = UUID().uuidString
 
         guard ClipboardManager.setClipboard(
             text,
-            transient: shouldRestoreClipboard,
-            sessionID: shouldRestoreClipboard ? sessionID : nil
+            transient: willRestoreClipboard,
+            sessionID: willRestoreClipboard ? sessionID : nil
         ) else {
             logger.error("Failed to prepare clipboard for paste")
             return .commandNotPosted
@@ -62,8 +101,8 @@ class CursorPaster {
 
         await wait(prePasteDelay)
 
-        let pasteResult = await postPasteCommand(text)
-        if shouldRestoreClipboard {
+        let pasteResult = await postPasteCommand(text, using: method)
+        if let savedContents {
             scheduleClipboardRestore(
                 savedContents,
                 expectedText: text,
@@ -75,8 +114,35 @@ class CursorPaster {
         return pasteResult
     }
 
-    private static func snapshotClipboard(from pasteboard: NSPasteboard) -> ClipboardSnapshot {
-        (pasteboard.pasteboardItems ?? []).map { item in
+    // Reading an item's data off NSPasteboard is a synchronous IPC to the pasteboard server, and
+    // the owning app supplies the payload lazily. When the owner is a remote/VM client — Windows
+    // App over RDP only fetches from the guest on demand — that IPC blocks until the server's ~60s
+    // timeout. On the main actor that freezes the whole app *after* transcription: the mini
+    // recorder stays up and the transcript pastes a minute late, into whatever window has focus by
+    // then. So take the snapshot off the main thread and give up early; a paste that loses the
+    // previous clipboard is far better than one that arrives a minute late in the wrong window.
+    private static func snapshotClipboard(timeout: TimeInterval) async -> ClipboardSnapshot? {
+        let resolver = OneShotResolver()
+
+        return await withCheckedContinuation { (continuation: CheckedContinuation<ClipboardSnapshot?, Never>) in
+            clipboardSnapshotQueue.async {
+                let snapshot = readClipboard()
+                if resolver.claim() {
+                    continuation.resume(returning: snapshot)
+                }
+            }
+
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) {
+                if resolver.claim() {
+                    logger.notice("Clipboard snapshot timed out after \(timeout, format: .fixed(precision: 1), privacy: .public)s – pasting without preserving the previous clipboard")
+                    continuation.resume(returning: nil)
+                }
+            }
+        }
+    }
+
+    private static func readClipboard() -> ClipboardSnapshot {
+        (NSPasteboard.general.pasteboardItems ?? []).map { item in
             item.types.compactMap { type in
                 if let data = item.data(forType: type) {
                     return (type, data)
@@ -87,8 +153,8 @@ class CursorPaster {
     }
 
     @MainActor
-    private static func postPasteCommand(_ text: String) async -> PasteResult {
-        switch PasteMethod.current() {
+    private static func postPasteCommand(_ text: String, using method: PasteMethod) async -> PasteResult {
+        switch method {
         case .appleScript:
             return pasteUsingAppleScript() ? .commandPosted : .commandNotPosted
         case .controlV:
