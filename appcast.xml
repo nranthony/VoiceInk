@@ -3,19 +3,22 @@
     <channel>
         <title>VoiceInk</title>
         <item>
-            <title>1.79</title>
-            <description><![CDATA[
-                <h3>What's New in v1.79</h3>
-                <ul>
-                    <li>🛠️ Fixed AppleScript paste crash</li>
-                    <li>⌨️ Fixed accidental Fn shortcut triggers</li>
-                </ul>
-            ]]></description>
-            <pubDate>Sat, 23 May 2026 20:23:30 +0545</pubDate>
-            <sparkle:version>179</sparkle:version>
-            <sparkle:shortVersionString>1.79</sparkle:shortVersionString>
+            <title>2.13</title>
+            <pubDate>Thu, 27 Aug 2026 22:54:28 +0545</pubDate>
+            <sparkle:version>213</sparkle:version>
+            <sparkle:shortVersionString>2.13</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.4</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/Beingpax/VoiceInk/releases/download/v1.79/VoiceInk.dmg" length="14406786" type="application/octet-stream" sparkle:edSignature="TI2RXCaX+lx8Dp7fERw9B4Ef+xHwJQxsshBnDClUAKsyafQjfM4DYOCm3Iz9dF7VaajUZccafIktBDsbtuRzCA=="/>
+            <description><![CDATA[<h3>What's New in VoiceInk 2.13</h3>
+<ul>
+  <li>✨ Added Gemini 3.5 Transcribe support</li>
+  <li>✨ Added SenseVoice Small support</li>
+  <li>⌨️ Improved cancellation handling</li>
+  <li>🎙️ Fixed the recorder panel issue — by @AlexSarbu</li>
+  <li>🎧 Fixed microphone routing issue in clamshell mode</li>
+  <li>🐛 Minor bug fixes and improvements</li>
+</ul>
+]]></description>
+            <enclosure url="https://github.com/Beingpax/VoiceInk/releases/download/v2.13/VoiceInk.dmg" length="50174451" type="application/octet-stream" sparkle:edSignature="EZyhSWJgi1u+VLfXBrlEci/V9T4bolvqsBIO2+1vHICIdb5gnq4IwSkk0FN9wagAm+f3v2UfIBEfQSSDC8OhAA=="/>
         </item>
     </channel>
 </rss>
