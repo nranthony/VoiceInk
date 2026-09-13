@@ -101,3 +101,13 @@ Icon
 Network Trash Folder
 Temporary Items
 .apdisk
+
+# Virtualenvs, whatever the environment names them (.venv, .venv-sandbox).
+.venv*/
+
+# Machine-local state is never committed; a committed *.local.example* is shared.
+*.local
+*.local.*
+!*.local.example*
+# Exception: this one is Xcode build config for `make local`, tracked on purpose.
+!VoiceInk/VoiceInk.local.entitlements
