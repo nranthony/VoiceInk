@@ -53,7 +53,7 @@ struct EnhancementRuntimeConfiguration {
 struct OutputRuntimeConfiguration {
     let mode: ModeConfig?
     let outputMode: ModeOutputMode
-    let autoSendKey: AutoSendKey
+    let autoSendKey: FinishAndSendKey
     let customCommand: ModeCustomCommand?
 }
 
@@ -82,14 +82,17 @@ enum ModeRuntimeResolver {
         }
 
         guard
-            let model = transcriptionModelManager.allAvailableModels.first(where: {
-                $0.name == modelName
-            })
+            let model = TranscriptionModelRegistry.model(
+                forSelectionKey: modelName,
+                in: transcriptionModelManager.allAvailableModels
+            )
         else {
             return .modelNotFound(mode: mode)
         }
 
-        guard transcriptionModelManager.usableModels.contains(where: { $0.name == modelName }) else {
+        guard transcriptionModelManager.usableModels.contains(where: {
+            $0.selectionKey == model.selectionKey
+        }) else {
             return .unavailable(mode: mode, model: model)
         }
 
@@ -183,7 +186,7 @@ enum ModeRuntimeResolver {
         return OutputRuntimeConfiguration(
             mode: mode,
             outputMode: mode?.outputMode ?? .paste,
-            autoSendKey: mode?.autoSendKey ?? .none,
+            autoSendKey: mode?.outputMode == .paste ? (mode?.autoSendKey ?? .none) : .none,
             customCommand: mode?.customCommand
         )
     }
@@ -232,10 +235,10 @@ enum ModeRuntimeResolver {
 
         let models = aiService.availableModels(for: provider)
         if let configuredModelName,
-            !configuredModelName.isEmpty,
-            (models.isEmpty || models.contains(configuredModelName))
+            !configuredModelName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            (provider.supportsCustomModelID || models.isEmpty || models.contains(configuredModelName))
         {
-            return configuredModelName
+            return configuredModelName.trimmingCharacters(in: .whitespacesAndNewlines)
         }
 
         if let firstModel = models.first {

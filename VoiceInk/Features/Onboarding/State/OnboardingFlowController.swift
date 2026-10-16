@@ -316,9 +316,7 @@ final class OnboardingFlowController {
             return
         }
 
-        Task {
-            await modelManager.downloadFluidAudioModel(model)
-        }
+        modelManager.startDownload(model)
     }
 
     func moveToExperienceStep(
@@ -364,9 +362,7 @@ final class OnboardingFlowController {
     }
 
     func skipOnboarding(onComplete: () -> Void) {
-        OnboardingStorageKeys.onboardingKeys.forEach {
-            coordinator.defaults.removeObject(forKey: $0)
-        }
+        guard coordinator.requiredPermissionsGranted else { return }
         onComplete()
     }
 

@@ -12,6 +12,7 @@ final class TranscriptionDelivery {
         let responseConfig: EnhancementRuntimeConfiguration?
         let responseError: String?
         let isAssistantFollowUp: Bool
+        let sendAfterPaste: Bool
     }
 
     struct Actions {
@@ -46,7 +47,8 @@ final class TranscriptionDelivery {
         }
 
         if let text = request.text {
-            await paste(text, output: request.output, actions: actions)
+            let sendKey = request.sendAfterPaste ? FinishAndSendSettings.selectedKey : request.output.autoSendKey
+            await paste(text, sendKey: sendKey, actions: actions)
         } else {
             await actions.dismiss()
         }
@@ -97,15 +99,16 @@ final class TranscriptionDelivery {
         }
 
         let commandText = deliverableText(from: text)
+        let finishAndSendKey: FinishAndSendKey = item.sendAfterPaste ? FinishAndSendSettings.selectedKey : .none
         SoundManager.shared.playStopSound()
         await actions.dismiss()
 
         Task {
-            await runCustomCommand(command: command, commandText: commandText)
+            await runCustomCommand(command: command, commandText: commandText, finishAndSendKey: finishAndSendKey)
         }
     }
 
-    private func runCustomCommand(command: String, commandText: String) async {
+    private func runCustomCommand(command: String, commandText: String, finishAndSendKey: FinishAndSendKey) async {
         let startTime = Date()
         logger.notice("Custom command started")
 
@@ -134,6 +137,12 @@ final class TranscriptionDelivery {
                     "Custom command succeeded duration=\(Self.formattedDuration(duration), privacy: .public)s stdoutBytes=\(stdoutBytes, privacy: .public) stderrBytes=\(stderrBytes, privacy: .public)"
                 )
             }
+
+            if finishAndSendKey.isEnabled {
+                // Let the target app finish pasting before sending.
+                try await Task.sleep(nanoseconds: 150_000_000)
+                CursorPaster.performSendKey(finishAndSendKey)
+            }
         } catch {
             notifyCustomCommandFailure(error, duration: Date().timeIntervalSince(startTime))
         }
@@ -154,22 +163,25 @@ final class TranscriptionDelivery {
         String(format: "%.3f", duration)
     }
 
-    private func paste(_ text: String, output: OutputRuntimeConfiguration, actions: Actions) async {
+    private func paste(_ text: String, sendKey: FinishAndSendKey, actions: Actions) async {
         let textToPaste = deliverableText(from: text)
         let appendSpace = UserDefaults.standard.bool(forKey: "AppendTrailingSpace")
         let pastedText = textToPaste + (appendSpace ? " " : "")
+        actions.setState(.idle)
         SoundManager.shared.playStopSound()
         await actions.dismiss()
 
         let pasteTask = CursorPaster.startPasteAtCursor(pastedText)
 
-        let autoSendKey = output.outputMode == .paste ? output.autoSendKey : .none
         Task { @MainActor in
-            _ = await pasteTask.value
+            let pasteOutcome = await pasteTask.value
 
-            if autoSendKey.isEnabled {
-                try? await Task.sleep(nanoseconds: 500_000_000)
-                CursorPaster.performAutoSend(autoSendKey)
+            if sendKey.isEnabled && pasteOutcome.result.didPostPasteCommand {
+                try? await Task.sleep(nanoseconds: 150_000_000)
+                if let generation = pasteOutcome.autoLearnGeneration {
+                    await AutoLearnService.shared.cancelForAutoSend(generation: generation)
+                }
+                CursorPaster.performSendKey(sendKey)
             }
         }
     }

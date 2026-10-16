@@ -11,8 +11,9 @@ struct VoiceInkApp: App {
     let container: ModelContainer
 
     @StateObject private var engine: VoiceInkEngine
-    @StateObject private var whisperModelManager: WhisperModelManager
-    @StateObject private var fluidAudioModelManager: FluidAudioModelManager
+    // Retain managers without subscribing the entire scene to download progress.
+    @State private var whisperModelManager: WhisperModelManager
+    @State private var fluidAudioModelManager: FluidAudioModelManager
     @StateObject private var transcriptionModelManager: TranscriptionModelManager
     @StateObject private var recorderUIManager: RecorderUIManager
     @StateObject private var recordingShortcutManager: RecordingShortcutManager
@@ -23,7 +24,7 @@ struct VoiceInkApp: App {
     @StateObject private var enhancementService: AIEnhancementService
     @StateObject private var licenseViewModel = LicenseViewModel.shared
     @StateObject private var activeWindowService = ActiveWindowService.shared
-    @AppStorage("hasCompletedOnboardingV2") private var hasCompletedOnboardingV2 = false
+    @AppStorage(OnboardingSettings.completedV2Key) private var hasCompletedOnboardingV2 = false
     @AppStorage("enableAnnouncements") private var enableAnnouncements = true
     @State private var showMenuBarIcon = true
     @State private var didShowLaunchReminders = false
@@ -38,6 +39,8 @@ struct VoiceInkApp: App {
     @StateObject private var prewarmService: ModelPrewarmService
 
     init() {
+        _ = LogExporter.shared
+
         // Disable HTTP response caching — prevents API responses from being stored in Cache.db
         URLCache.shared = URLCache(memoryCapacity: 0, diskCapacity: 0)
 
@@ -89,7 +92,7 @@ struct VoiceInkApp: App {
         }
 
         container = resolvedContainer
-        DictionaryService.removeExactDuplicateContent(context: resolvedContainer.mainContext, source: "launch")
+        DictionaryService.cleanUpDictionaryContent(context: resolvedContainer.mainContext, source: "launch")
 
         // Initialize services with proper sharing of instances
         let aiService = AIService()
@@ -104,6 +107,13 @@ struct VoiceInkApp: App {
 
         let enhancementService = AIEnhancementService(aiService: aiService, modelContext: resolvedContainer.mainContext)
         _enhancementService = StateObject(wrappedValue: enhancementService)
+        let autoLearnReviewer = AutoLearnAIReviewer(enhancementService: enhancementService)
+        Task {
+            await AutoLearnService.shared.configure(
+                modelContainer: resolvedContainer,
+                reviewer: autoLearnReviewer
+            )
+        }
 
         // 1. Create modelsDirectory URL
         let appSupportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -141,8 +151,8 @@ struct VoiceInkApp: App {
         transcriptionModelManager.refreshAllAvailableModels()
         transcriptionModelManager.loadCurrentTranscriptionModel()
 
-        _whisperModelManager = StateObject(wrappedValue: whisperModelManager)
-        _fluidAudioModelManager = StateObject(wrappedValue: fluidAudioModelManager)
+        _whisperModelManager = State(initialValue: whisperModelManager)
+        _fluidAudioModelManager = State(initialValue: fluidAudioModelManager)
         _transcriptionModelManager = StateObject(wrappedValue: transcriptionModelManager)
         _recorderUIManager = StateObject(wrappedValue: recorderUIManager)
         _engine = StateObject(wrappedValue: engine)
@@ -153,7 +163,7 @@ struct VoiceInkApp: App {
 
         let menuBarManager = MenuBarManager()
         _menuBarManager = StateObject(wrappedValue: menuBarManager)
-        menuBarManager.configure(modelContainer: resolvedContainer, engine: engine)
+        menuBarManager.configure(engine: engine)
 
         let activeWindowService = ActiveWindowService.shared
         _activeWindowService = StateObject(wrappedValue: activeWindowService)
@@ -161,7 +171,8 @@ struct VoiceInkApp: App {
         let prewarmService = ModelPrewarmService(
             transcriptionModelManager: transcriptionModelManager,
             whisperModelManager: whisperModelManager,
-            modelContext: resolvedContainer.mainContext
+            modelContext: resolvedContainer.mainContext,
+            fluidAudioService: engine.serviceRegistry.fluidAudioTranscriptionService
         )
         _prewarmService = StateObject(wrappedValue: prewarmService)
 
@@ -299,12 +310,25 @@ struct VoiceInkApp: App {
                         .environmentObject(aiService)
                         .environmentObject(enhancementService)
                         .modelContainer(container)
-                        .onAppear {
-                            if enableAnnouncements {
-                                AnnouncementsService.shared.start()
+                        .lazyChangeLogPresenter { isPresenting in
+                            if isPresenting {
+                                if enableAnnouncements {
+                                    AnnouncementsService.shared.stop()
+                                }
+                            } else {
+                                if enableAnnouncements {
+                                    AnnouncementsService.shared.start()
+                                }
+                                showLaunchRemindersIfNeeded()
                             }
-
-                            showLaunchRemindersIfNeeded()
+                        }
+                        .onAppear {
+                            if !ChangeLogManager.needsPresentation() {
+                                if enableAnnouncements {
+                                    AnnouncementsService.shared.start()
+                                }
+                                showLaunchRemindersIfNeeded()
+                            }
 
                             GitHubStarPromptCoordinator.shared.scheduleIfNeeded(modelContainer: container)
 
