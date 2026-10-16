@@ -81,7 +81,16 @@ class CursorPaster {
             return (PasteOutcome(result: .commandNotPosted, autoLearnGeneration: nil), nil)
         }
 
-        await wait(prePasteDelay)
+        let remoteDesktopClient = RemoteDesktopClipboardSync.frontmostClient()
+        if let remoteDesktopClient {
+            guard await RemoteDesktopClipboardSync.syncClipboard(to: remoteDesktopClient, sessionID: sessionID) else {
+                // Leave the transcript on the clipboard so it can still be pasted by hand.
+                logger.error("Paste skipped: RDP clipboard sync failed id=\(sessionID, privacy: .public)")
+                return (PasteOutcome(result: .commandNotPosted, autoLearnGeneration: nil), nil)
+            }
+        } else {
+            await wait(prePasteDelay)
+        }
 
         let application = NSWorkspace.shared.frontmostApplication
         let appIdentifier = application?.bundleIdentifier ?? "unknown"
@@ -106,7 +115,9 @@ class CursorPaster {
                 savedContents,
                 expectedText: text,
                 sessionID: sessionID,
-                on: pasteboard
+                on: pasteboard,
+                minimumDelay: remoteDesktopClient == nil
+                    ? minimumClipboardRestoreDelay : RemoteDesktopClipboardSync.minimumClipboardRestoreDelay
             )
         } else {
             clipboardRestoreTask = nil
@@ -143,12 +154,13 @@ class CursorPaster {
         _ savedContents: ClipboardSnapshot,
         expectedText: String,
         sessionID: String,
-        on pasteboard: NSPasteboard
+        on pasteboard: NSPasteboard,
+        minimumDelay: TimeInterval
     ) -> Task<Void, Never> {
         let delay = min(
             max(
                 UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
-                minimumClipboardRestoreDelay
+                minimumDelay
             ),
             5.0
         )
@@ -246,9 +258,12 @@ class CursorPaster {
             return .commandNotPosted
         }
 
-        cmdDown.flags = .maskCommand
-        vDown.flags = .maskCommand
-        vUp.flags = .maskCommand
+        // Include the device-dependent left-Command bit that a real keyboard sets. Without it, SDL
+        // (FreeRDP's client) cannot tell which Command key is down and reports both Left and Right.
+        let leftCommand = CGEventFlags(rawValue: CGEventFlags.maskCommand.rawValue | UInt64(NX_DEVICELCMDKEYMASK))
+        cmdDown.flags = leftCommand
+        vDown.flags = leftCommand
+        vUp.flags = leftCommand
         cmdUp.flags = []
 
         cmdDown.post(tap: .cghidEventTap)
