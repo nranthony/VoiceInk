@@ -113,3 +113,5 @@ Temporary Items
 !*.local.example*
 # Exception: this one is Xcode build config for `make local`, tracked on purpose.
 !VoiceInk/VoiceInk.local.entitlements
+
+inbox
