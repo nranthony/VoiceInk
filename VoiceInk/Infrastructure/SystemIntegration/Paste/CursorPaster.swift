@@ -116,8 +116,7 @@ class CursorPaster {
                 expectedText: text,
                 sessionID: sessionID,
                 on: pasteboard,
-                minimumDelay: remoteDesktopClient == nil
-                    ? minimumClipboardRestoreDelay : RemoteDesktopClipboardSync.minimumClipboardRestoreDelay
+                remoteDesktopClient: remoteDesktopClient
             )
         } else {
             clipboardRestoreTask = nil
@@ -155,12 +154,13 @@ class CursorPaster {
         expectedText: String,
         sessionID: String,
         on pasteboard: NSPasteboard,
-        minimumDelay: TimeInterval
+        remoteDesktopClient: RemoteDesktopClipboardSync.Client?
     ) -> Task<Void, Never> {
         let delay = min(
             max(
                 UserDefaults.standard.double(forKey: "clipboardRestoreDelay"),
-                minimumDelay
+                remoteDesktopClient == nil
+                    ? minimumClipboardRestoreDelay : RemoteDesktopClipboardSync.minimumClipboardRestoreDelay
             ),
             5.0
         )
@@ -177,6 +177,9 @@ class CursorPaster {
                 return
             }
             logger.notice("Clipboard restored id=\(sessionID, privacy: .public)")
+            if let remoteDesktopClient {
+                await RemoteDesktopClipboardSync.announceRestoredClipboard(to: remoteDesktopClient, sessionID: sessionID)
+            }
         }
     }
 
@@ -192,7 +195,7 @@ class CursorPaster {
     private static func pasteboardItems(from snapshot: ClipboardSnapshot) -> [NSPasteboardItem] {
         snapshot.map { itemSnapshot in
             let item = NSPasteboardItem()
-            for (type, data) in itemSnapshot {
+            for (type, data) in itemSnapshot where !RemoteDesktopClipboardSync.isClientOwnershipMarker(type) {
                 item.setData(data, forType: type)
             }
             return item

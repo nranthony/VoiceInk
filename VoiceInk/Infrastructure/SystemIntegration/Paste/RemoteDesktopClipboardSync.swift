@@ -2,6 +2,7 @@ import AppKit
 import ApplicationServices
 import Darwin
 import os
+import UniformTypeIdentifiers
 
 /// FreeRDP's SDL3 client only reads the Mac clipboard when its window becomes key
 /// (SDL_cocoawindow.m `windowDidBecomeKey` → `Cocoa_CheckClipboardUpdate`), so text written to the
@@ -16,6 +17,11 @@ enum RemoteDesktopClipboardSync {
     private static let clientCellarPrefix = "/opt/homebrew/Cellar/freerdp/"
     private static let clientExecutableSuffix = "/bin/sdl-freerdp"
 
+    // FreeRDP tags clipboard contents it received from the server with this MIME type (plus a
+    // per-session UUID). A local clipboard carrying it is treated as FreeRDP's own server data:
+    // its change is never announced and server requests for it are refused.
+    private static let clientOwnershipMIMEPrefix = "x-special/freerdp-clipboard-update"
+
     // Hidden tuning knobs: `defaults write com.prakashjoshipax.VoiceInk <key> <value>`.
     private enum DefaultsKey {
         /// "finder" (the default) or any running app's bundle ID. VoiceInk itself cannot be the target:
@@ -27,6 +33,9 @@ enum RemoteDesktopClipboardSync {
     }
 
     private static let focusChangeTimeout: TimeInterval = 1.0
+    private static let keyboardIdleInterval: TimeInterval = 0.5
+    /// Past this the restore is left for SDL to pick up on the client's next focus change.
+    private static let keyboardIdleTimeout: TimeInterval = 10.0
 
     struct Client {
         let processIdentifier: pid_t
@@ -83,6 +92,40 @@ enum RemoteDesktopClipboardSync {
 
         logger.notice("RDP clipboard sync: refocused client target=\(target, privacy: .public) id=\(sessionID, privacy: .public)")
         return true
+    }
+
+    /// Restoring the clipboard after a paste is another change SDL only sees on refocus; without
+    /// announcing it, the remote session keeps the transcript instead of what was copied before.
+    @MainActor
+    static func announceRestoredClipboard(to client: Client, sessionID: String) async {
+        // Not frontmost: SDL picks the restored clipboard up when its window next becomes key.
+        guard frontmostPID() == client.processIdentifier else { return }
+
+        guard await waitUntil({ isKeyboardIdle() }, timeout: keyboardIdleTimeout) else {
+            logger.notice("RDP clipboard sync: keyboard busy, restore not announced id=\(sessionID, privacy: .public)")
+            return
+        }
+        guard frontmostPID() == client.processIdentifier else { return }
+        _ = await syncClipboard(to: client, sessionID: sessionID)
+    }
+
+    /// SDL releases every key when its window loses focus and does not see a modifier that is still
+    /// held when focus returns, so a Cmd+V pressed across a focus bounce reaches the remote as a bare
+    /// "v". Bounce only once no modifier is held and the keyboard has been quiet for a moment.
+    private static func isKeyboardIdle() -> Bool {
+        let modifiers: CGEventFlags = [.maskCommand, .maskControl, .maskAlternate, .maskShift]
+        guard CGEventSource.flagsState(.combinedSessionState).intersection(modifiers).isEmpty else {
+            return false
+        }
+        return [CGEventType.keyDown, .flagsChanged].allSatisfy {
+            CGEventSource.secondsSinceLastEventType(.combinedSessionState, eventType: $0) >= keyboardIdleInterval
+        }
+    }
+
+    /// SDL exposes MIME types on the Mac pasteboard as (usually dynamic) UTIs.
+    static func isClientOwnershipMarker(_ type: NSPasteboard.PasteboardType) -> Bool {
+        let mimeType = UTType(type.rawValue)?.preferredMIMEType ?? type.rawValue
+        return mimeType.hasPrefix(clientOwnershipMIMEPrefix)
     }
 
     @MainActor
