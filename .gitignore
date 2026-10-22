@@ -115,3 +115,5 @@ Temporary Items
 !VoiceInk/VoiceInk.local.entitlements
 
 inbox
+# Per-machine Makefile overrides (e.g. LOCAL_APP_DEST)
+Makefile.local

@@ -41,14 +41,15 @@ Swift compilation flag, and does NOT touch the normal Debug/Release configs.
 
 ```bash
 make local
-open ~/Downloads/VoiceInk.app
+open ~/Applications/VoiceInk.app
 ```
 
-Upstream's `make local` builds **Release** and copies to `~/Downloads`. Two things to know:
-Bitdefender Safe Files guards `~/Downloads`, so the copy step can be blocked and leave a *stale*
-app sitting there that you then run by mistake; and this fork carries a patch making the
-destination configurable (`LOCAL_APP_DEST`, defaulting to `~/Applications`) that has not been
-ported onto this layout yet.
+`make local` builds **Release** into `.local-build/` and installs to `LOCAL_APP_DEST`, which this
+fork defaults to `~/Applications` (upstream hardcodes `~/Downloads`). Override it per machine in
+an untracked `Makefile.local`, or per run: `make local LOCAL_APP_DEST=/some/dir`. Avoid
+`~/Downloads`: Bitdefender Safe Files guards it and blocks the replace step. A failed install
+now stops `make local` with an error instead of leaving a stale app that looks current.
+`BUILDING.md` is upstream's and still says `~/Downloads`.
 
 Do not switch to `make build` / `make all` for local dev — those expect an Apple
 Developer team (`DEVELOPMENT_TEAM` in the project) that this machine isn't set up for.

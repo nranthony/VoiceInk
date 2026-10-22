@@ -6,6 +6,12 @@ LOCAL_DERIVED_DATA := $(CURDIR)/.local-build
 LOCAL_CODESIGN_IDENTITY ?=
 RUN_APP_NAME ?= VoiceInk
 
+# Where `make local` installs the finished app. Override per-machine in an untracked
+# Makefile.local (e.g. LOCAL_APP_DEST := /Volumes/DataDrive/applications) or per-invocation:
+#   make local LOCAL_APP_DEST=/Volumes/DataDrive/applications
+-include Makefile.local
+LOCAL_APP_DEST ?= $(HOME)/Applications
+
 .PHONY: all clean whisper setup build local check healthcheck help dev run release release-setup
 
 # Default target
@@ -85,14 +91,18 @@ local: check setup
 		-skipMacroValidation \
 		build
 	@APP_PATH="$(LOCAL_DERIVED_DATA)/Build/Products/Release/VoiceInk.app" && \
+	DEST="$(LOCAL_APP_DEST)/VoiceInk.app" && \
 	if [ -d "$$APP_PATH" ]; then \
-		echo "Copying VoiceInk.app to ~/Downloads..."; \
-		rm -rf "$$HOME/Downloads/VoiceInk.app"; \
-		ditto "$$APP_PATH" "$$HOME/Downloads/VoiceInk.app"; \
-		xattr -cr "$$HOME/Downloads/VoiceInk.app"; \
+		echo "Copying VoiceInk.app to $(LOCAL_APP_DEST)..."; \
+		if ! { mkdir -p "$(LOCAL_APP_DEST)" && rm -rf "$$DEST" && ditto "$$APP_PATH" "$$DEST"; }; then \
+			echo "Error: could not replace $$DEST; it may still hold an older build."; \
+			echo "The new build is at: $$APP_PATH"; \
+			exit 1; \
+		fi; \
+		xattr -cr "$$DEST"; \
 		echo ""; \
-		echo "Build complete! App saved to: ~/Downloads/VoiceInk.app"; \
-		echo "Run with: open ~/Downloads/VoiceInk.app"; \
+		echo "Build complete! App saved to: $$DEST"; \
+		echo "Run with: open \"$$DEST\""; \
 		echo ""; \
 		echo "Limitations of local builds:"; \
 		echo "  - No iCloud dictionary sync"; \
@@ -104,9 +114,9 @@ local: check setup
 
 # Run application
 run:
-	@if [ -d "$$HOME/Downloads/$(RUN_APP_NAME).app" ]; then \
-		echo "Opening ~/Downloads/$(RUN_APP_NAME).app..."; \
-		open "$$HOME/Downloads/$(RUN_APP_NAME).app"; \
+	@if [ -d "$(LOCAL_APP_DEST)/$(RUN_APP_NAME).app" ]; then \
+		echo "Opening $(LOCAL_APP_DEST)/$(RUN_APP_NAME).app..."; \
+		open "$(LOCAL_APP_DEST)/$(RUN_APP_NAME).app"; \
 	else \
 		echo "Looking for $(RUN_APP_NAME).app in DerivedData..."; \
 		APP_PATH=$$(find "$$HOME/Library/Developer/Xcode/DerivedData" -name "$(RUN_APP_NAME).app" -type d | head -1) && \
