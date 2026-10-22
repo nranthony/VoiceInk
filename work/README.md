@@ -31,6 +31,7 @@ problem was understood is usually the useful part.
 | [shortcut-permission-diagnostics](shortcut-permission-diagnostics.md) | open | Missing Input Monitoring kills the global hotkey with no log output; add diagnostics and retry-on-activate |
 | [agentic-actions-research](agentic-actions-research.md) | research complete | Voice → Claude Code → ClickUp: routing surface, upstream `customCommand` seam, constraints, implementation ladder |
 | [paste-shortcuts-branch-review](paste-shortcuts-branch-review.md) | open | Security + validity review of the branch (clean / 3 minor fixes) and of the v2.1 plan (claims verified; conflict map + step 6 stale) |
+| [freerdp-clipboard-sync](freerdp-clipboard-sync.md) | open | Paste + clipboard restore into Homebrew sdl-freerdp works; backlog: images not restored, stable signing, fork version label; regression checklist |
 
 ## Fork patch categories
 
